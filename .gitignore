@@ -1,0 +1,9 @@
+# Segredos: NUNCA subir
+.env
+*.db
+*.sqlite3
+
+# Python
+venv/
+__pycache__/
+*.pyc

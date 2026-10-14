@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block b %}<div class="box" style="text-align:center"><span class="logo">Cripto<b>Pix</b></span>
+<p style="color:var(--mut)">{{p.service}}</p><h1 style="margin:0;font-size:44px;letter-spacing:-1.5px">R$ {{'%.2f'|format(p.brl)|replace('.',',')}}</h1><div style="margin:18px 0">
+{% if p.status=='AGUARDANDO_PIX' %}{% if p.pix_code %}<p style="color:var(--mut);font-size:13px">Pague por Pix copia e cola:</p><div class="pix" id="c">{{p.pix_code}}</div>
+<button class="btn" style="margin-top:12px" onclick="navigator.clipboard.writeText(document.getElementById('c').innerText);this.textContent='Código copiado'">Copiar código Pix</button>
+{% else %}<p style="color:var(--mut)">O código Pix ainda não foi gerado. Fale com quem enviou o link.</p>{% endif %}
+{% elif p.status in ('PIX_CONFIRMADO','ENVIADO') %}<p class="ok" style="font-size:20px">Pagamento recebido ✓</p>
+{% else %}<p style="color:var(--red2)">Cobrança indisponível.</p>{% endif %}</div>
+<p style="color:var(--mut);font-size:12px">Pagamento processado por parceiro financeiro.</p></div>
+{% if p.status=='AGUARDANDO_PIX' %}<script>setInterval(async()=>{try{const r=await fetch('/api/status/{{p.code}}');if((await r.json()).status!=='AGUARDANDO_PIX')location.reload()}catch(e){}},5000)</script>{% endif %}{% endblock %}
