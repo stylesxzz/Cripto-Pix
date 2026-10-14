@@ -14,8 +14,8 @@ Painel de administração para cobrar em reais por **Pix** e receber em **cripto
 ## Instalação (Termux ou Linux)
 
 ```bash
-git clone https://github.com/SEU_USUARIO/SEU_REPOSITORIO.git
-cd SEU_REPOSITORIO
+git clone https://github.com/stylesxzz/Cripto-Pix.git
+cd Cripto-Pix
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
