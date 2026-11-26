@@ -37,3 +37,13 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;p
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:760px){.grid2,.flow{grid-template-columns:1fr}nav .links{display:none}.orb{opacity:.35;right:-60px}.glass{display:none}}
 .pix{word-break:break-all;font:12px monospace;background:#0b0507;border:1px solid var(--line);padding:10px;border-radius:10px;max-height:90px;overflow:auto}
 @media(prefers-reduced-motion:no-preference){.orb{animation:p 5s ease-in-out infinite}@keyframes p{50%{box-shadow:0 0 160px #e11d2e99,inset -30px -30px 60px #000}}}
+
+/* Configuração inicial e login */
+.auth-box{max-width:620px;margin:4vh auto;padding:30px}
+.auth-box h2{margin:10px 0 4px;font-size:27px;letter-spacing:-.6px}
+.auth-box h3{font-size:15px;margin:24px 0 10px;color:var(--tx);padding-bottom:8px;border-bottom:1px solid var(--line)}
+.muted{color:var(--mut);font-size:14px;margin:0 0 18px}
+.error{color:#ff8790;background:#ff334014;border:1px solid #ff334055;padding:10px 12px;border-radius:10px;font-size:13px}
+.optional{font-size:11px;color:var(--ok);font-weight:500;border:1px solid #3ddc9755;border-radius:99px;padding:3px 8px;margin-left:5px}
+.security-note{font-size:12px;color:var(--mut);margin:16px 0 0;line-height:1.5}
+@media(max-width:640px){.auth-box{margin:16px 12px;padding:22px}.auth-box .grid2{grid-template-columns:1fr;gap:0}}
