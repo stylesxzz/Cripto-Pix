@@ -1,32 +1,60 @@
-import os, re, sqlite3, secrets, time, threading, urllib.parse
+import os, re, sqlite3, secrets, time, threading, urllib.parse, base64, hashlib, json
 from datetime import datetime, timezone, timedelta, date
 from functools import wraps
 from dotenv import load_dotenv
 load_dotenv()
 from flask import Flask, request, session, redirect, render_template, abort, jsonify, g
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
+from cryptography.fernet import Fernet
+import psycopg
+from psycopg.rows import dict_row
 import hodle, whatsapp
 
 app = Flask(__name__)
-app.secret_key = os.environ["SECRET_KEY"]
+app.secret_key = os.environ.get("APP_SESSION_SECRET") or os.environ.get("SECRET_KEY")
+if not app.secret_key:
+    raise RuntimeError("Configure APP_SESSION_SECRET nas variáveis da Vercel.")
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=True)
+DB = os.environ.get("DB_PATH", "cripto_pix_v2.db")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+LIVE = False
 BASE = os.environ.get("BASE_URL", "http://localhost:5000").rstrip("/")
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.environ.get("FORCE_HTTPS") == "1")
-DB = os.environ.get("DB_PATH", "cripto_pix_v2.db"); LIVE = os.environ.get("HODLE_LIVE") == "1"
 MAX = float(os.environ.get("MAX_BRL", 2000)); MIN_SUB = float(os.environ.get("MIN_SUB_BRL", 100))
 ADDR = {"Base": r"^0x[a-fA-F0-9]{40}$", "Ethereum": r"^0x[a-fA-F0-9]{40}$", "Solana": r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", "Tron": r"^T[1-9A-HJ-NP-Za-km-z]{33}$"}
-ASSET = os.environ.get("WALLET_ASSET", "USDC").upper(); NET = os.environ.get("WALLET_NETWORK", "Base"); WALLET = os.environ.get("WALLET_ADDRESS", "").strip()
-WALLET_OK = ASSET in ("USDC", "USDT") and NET in ADDR and bool(re.match(ADDR[NET], WALLET))
+ASSET = "USDC"; NET = "Base"; WALLET = ""; WALLET_OK = False
 BR = timezone(timedelta(hours=-3))
 def today(): return datetime.now(BR).date()
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY, code TEXT UNIQUE, customer TEXT, whatsapp TEXT, service TEXT, brl REAL, asset TEXT, network TEXT, address TEXT,
- pix_code TEXT, status TEXT, provider_id TEXT UNIQUE, txid TEXT, note TEXT, sub_id INTEGER, notified INTEGER DEFAULT 0, created TEXT, updated TEXT);
-CREATE TABLE IF NOT EXISTS subs(id INTEGER PRIMARY KEY, name TEXT, whatsapp TEXT, brl REAL, day INTEGER, next_date TEXT, active INTEGER DEFAULT 1, created TEXT);
+SQLITE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE, customer TEXT, whatsapp TEXT, service TEXT, brl REAL, asset TEXT, network TEXT, address TEXT, pix_code TEXT, status TEXT, provider_id TEXT UNIQUE, txid TEXT, note TEXT, sub_id INTEGER, notified INTEGER DEFAULT 0, created TEXT, updated TEXT);
+CREATE TABLE IF NOT EXISTS subs(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, whatsapp TEXT, brl REAL, day INTEGER, next_date TEXT, active INTEGER DEFAULT 1, created TEXT);
 CREATE TABLE IF NOT EXISTS events(provider_id TEXT, status TEXT, UNIQUE(provider_id,status));
 CREATE TABLE IF NOT EXISTS audit(ts TEXT, actor TEXT, action TEXT, detail TEXT);
+CREATE TABLE IF NOT EXISTS app_config(id INTEGER PRIMARY KEY CHECK(id=1), username TEXT NOT NULL, password_hash TEXT NOT NULL, encrypted_settings TEXT NOT NULL, created_at TEXT NOT NULL);
 """
-def now(): return datetime.now(timezone.utc).isoformat(timespec="seconds")
-def conn(): c = sqlite3.connect(DB, timeout=15); c.row_factory = sqlite3.Row; return c
+POSTGRES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS orders(id BIGSERIAL PRIMARY KEY, code TEXT UNIQUE, customer TEXT, whatsapp TEXT, service TEXT, brl DOUBLE PRECISION, asset TEXT, network TEXT, address TEXT, pix_code TEXT, status TEXT, provider_id TEXT UNIQUE, txid TEXT, note TEXT, sub_id BIGINT, notified INTEGER DEFAULT 0, created TEXT, updated TEXT);
+CREATE TABLE IF NOT EXISTS subs(id BIGSERIAL PRIMARY KEY, name TEXT, whatsapp TEXT, brl DOUBLE PRECISION, day INTEGER, next_date TEXT, active INTEGER DEFAULT 1, created TEXT);
+CREATE TABLE IF NOT EXISTS events(provider_id TEXT, status TEXT, UNIQUE(provider_id,status));
+CREATE TABLE IF NOT EXISTS audit(ts TEXT, actor TEXT, action TEXT, detail TEXT);
+CREATE TABLE IF NOT EXISTS app_config(id INTEGER PRIMARY KEY CHECK(id=1), username TEXT NOT NULL, password_hash TEXT NOT NULL, encrypted_settings TEXT NOT NULL, created_at TEXT NOT NULL);
+"""
+class PgCompat:
+    def __init__(self, raw): self.raw = raw
+    def execute(self, sql, params=()): return self.raw.execute(sql.replace("?", "%s"), params)
+    def commit(self): self.raw.commit()
+    def close(self): self.raw.close()
+def conn():
+    if DATABASE_URL:
+        return PgCompat(psycopg.connect(DATABASE_URL, row_factory=dict_row, connect_timeout=10))
+    c = sqlite3.connect(DB, timeout=15); c.row_factory = sqlite3.Row; return c
+def init_db():
+    c = conn()
+    try:
+        schema = POSTGRES_SCHEMA if DATABASE_URL else SQLITE_SCHEMA
+        for statement in schema.split(";"):
+            if statement.strip(): c.execute(statement)
+        c.commit()
+    finally: c.close()
 def db():
     if "db" not in g: g.db = conn()
     return g.db
@@ -35,7 +63,36 @@ def close(_):
     d = g.pop("db", None)
     if d: d.close()
 def audit(c, actor, action, detail=""): c.execute("INSERT INTO audit VALUES(?,?,?,?)", (now(), actor, action, detail)); c.commit()
-with conn() as c0: c0.executescript(SCHEMA)
+def _fernet():
+    raw = os.environ.get("APP_ENCRYPTION_KEY")
+    if not raw: raise RuntimeError("Configure APP_ENCRYPTION_KEY nas variáveis da Vercel.")
+    key = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+    return Fernet(key)
+def get_saved_config():
+    c = conn()
+    try: row = c.execute("SELECT username,password_hash,encrypted_settings FROM app_config WHERE id=1").fetchone()
+    finally: c.close()
+    if not row: return None
+    payload = _fernet().decrypt(row["encrypted_settings"].encode()).decode()
+    return {"username": row["username"], "password_hash": row["password_hash"], **json.loads(payload)}
+def apply_settings(cfg):
+    global BASE, LIVE, MAX, MIN_SUB, ASSET, NET, WALLET, WALLET_OK
+    if not cfg: return
+    BASE = cfg.get("base_url") or BASE
+    LIVE = False
+    MAX = float(os.environ.get("MAX_BRL", 2000)); MIN_SUB = float(os.environ.get("MIN_SUB_BRL", 100))
+    ASSET = cfg.get("wallet_asset", "USDC").upper()
+    NET = cfg.get("wallet_network", "Base")
+    WALLET = cfg.get("wallet_address", "").strip()
+    WALLET_OK = ASSET in ("USDC", "USDT") and NET in ADDR and bool(re.match(ADDR[NET], WALLET))
+    hodle.configure(cfg.get("hodle_api_key", ""), cfg.get("hodle_workspace_id", ""))
+    whatsapp.configure(cfg.get("wa_token", ""), cfg.get("wa_phone_id", ""), cfg.get("wa_template", "cobranca_mensal"), cfg.get("wa_lang", "pt_BR"))
+def has_setup():
+    c = conn()
+    try: return c.execute("SELECT 1 FROM app_config WHERE id=1").fetchone() is not None
+    finally: c.close()
+init_db()
+apply_settings(get_saved_config())
 def phone(v):
     d = re.sub(r"\D", "", v or ""); return "55" + d if len(d) in (10, 11) else d
 def money(v):
@@ -76,7 +133,13 @@ def loop():
         try: due_job()
         except Exception as e: print("job:", e)
         time.sleep(60)
-threading.Thread(target=loop, daemon=True).start()
+# Em produção serverless, cobranças recorrentes devem usar Cron/Workflow.
+if not os.environ.get("VERCEL"):
+    threading.Thread(target=loop, daemon=True).start()
+
+@app.before_request
+def refresh_saved_settings():
+    apply_settings(get_saved_config())
 
 def csrf(): session.setdefault("csrf", secrets.token_hex(16)); return session["csrf"]
 app.jinja_env.globals["csrf"] = csrf
@@ -91,14 +154,57 @@ tries = {}
 @app.route("/login", methods=["GET", "POST"])
 def login():
     err = None
+    configured = has_setup()
     if request.method == "POST":
-        ip = request.remote_addr; t = [x for x in tries.get(ip, []) if time.time() - x < 600]
-        if len(t) >= 5: return "Muitas tentativas. Aguarde 10 minutos.", 429
-        if not os.environ.get("ADMIN_PASS_HASH"): return render_template("login.html", err="ADMIN_PASS_HASH não está no .env. Rode: python gerar_hash.py")
-        if request.form.get("user") == os.environ.get("ADMIN_USER") and os.environ.get("ADMIN_PASS_HASH") and check_password_hash(os.environ["ADMIN_PASS_HASH"], request.form.get("password", "")):
-            session.clear(); session["admin"] = True; audit(db(), "admin", "login", ip); return redirect("/admin")
-        tries[ip] = t + [time.time()]; err = "Usuário ou senha incorretos."
-    return render_template("login.html", err=err)
+        if not secrets.compare_digest(request.form.get("_csrf", ""), session.get("csrf", "x")):
+            abort(400, "Sessão inválida. Atualize a página e tente novamente.")
+        if not configured:
+            username = request.form.get("user", "").strip()
+            password = request.form.get("password", "")
+            confirm = request.form.get("password_confirm", "")
+            wallet_asset = request.form.get("wallet_asset", "USDC").upper()
+            wallet_network = request.form.get("wallet_network", "Base")
+            wallet_address = request.form.get("wallet_address", "").strip()
+            api_key = request.form.get("hodle_api_key", "").strip()
+            workspace_id = request.form.get("hodle_workspace_id", "").strip()
+            if not username or len(password) < 10 or password != confirm:
+                err = "Informe um usuário, uma senha com pelo menos 10 caracteres e confirme a senha."
+            elif wallet_asset not in ("USDC", "USDT") or wallet_network not in ADDR or not re.match(ADDR[wallet_network], wallet_address):
+                err = "Confira a moeda, a rede e o endereço público da carteira."
+            elif not api_key or not workspace_id:
+                err = "Informe a chave API e o ID do Workspace da Hodle."
+            else:
+                payload = {
+                    "wallet_asset": wallet_asset, "wallet_network": wallet_network, "wallet_address": wallet_address,
+                    "hodle_api_key": api_key, "hodle_workspace_id": workspace_id,
+                    "wa_token": request.form.get("wa_token", "").strip(),
+                    "wa_phone_id": request.form.get("wa_phone_id", "").strip(),
+                    "wa_template": request.form.get("wa_template", "cobranca_mensal").strip() or "cobranca_mensal",
+                    "wa_lang": request.form.get("wa_lang", "pt_BR").strip() or "pt_BR",
+                    "base_url": request.url_root.rstrip("/")
+                }
+                encrypted = _fernet().encrypt(json.dumps(payload).encode()).decode()
+                c = conn()
+                try:
+                    if c.execute("SELECT 1 FROM app_config WHERE id=1").fetchone():
+                        abort(409, "A configuração inicial já foi concluída.")
+                    c.execute("INSERT INTO app_config(id,username,password_hash,encrypted_settings,created_at) VALUES(1,?,?,?,?)",
+                              (username, generate_password_hash(password), encrypted, now()))
+                    c.commit()
+                finally: c.close()
+                apply_settings(get_saved_config())
+                session.clear(); session["admin"] = True; session["csrf"] = secrets.token_hex(16)
+                audit(db(), "admin", "configuracao_inicial", "Administrador único configurado")
+                return redirect("/admin")
+        else:
+            ip = request.remote_addr; t = [x for x in tries.get(ip, []) if time.time() - x < 600]
+            if len(t) >= 5: return "Muitas tentativas. Aguarde 10 minutos.", 429
+            cfg = get_saved_config()
+            if cfg and request.form.get("user", "").strip() == cfg["username"] and check_password_hash(cfg["password_hash"], request.form.get("password", "")):
+                session.clear(); session["admin"] = True; audit(db(), "admin", "login", ip); return redirect("/admin")
+            tries[ip] = t + [time.time()]; err = "Usuário ou senha incorretos."
+    session.setdefault("csrf", secrets.token_hex(16))
+    return render_template("login.html", err=err, setup=not configured)
 @app.route("/logout")
 def logout(): session.clear(); return redirect("/login")
 @app.route("/")
@@ -172,7 +278,7 @@ def webhook():
     ev = hodle.verify_webhook(request.headers, request.get_data())
     if not ev: audit(db(), "webhook", "rejeitado", request.remote_addr); abort(401)
     d = db(); o = d.execute("SELECT * FROM orders WHERE provider_id=?", (ev["provider_id"],)).fetchone()
-    if not o or d.execute("INSERT OR IGNORE INTO events VALUES(?,?)", (ev["provider_id"], ev["status"])).rowcount == 0: return "", 200  # idempotencia
+    if not o or d.execute("INSERT INTO events VALUES(?,?) ON CONFLICT DO NOTHING", (ev["provider_id"], ev["status"])).rowcount == 0: return "", 200  # idempotencia
     d.commit()
     if ev["status"] == "failed": _set(o["id"], "FALHOU")
     elif ev["status"] == "paid" and o["status"] == "AGUARDANDO_PIX":
