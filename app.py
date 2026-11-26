@@ -14,7 +14,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("APP_SESSION_SECRET") or os.environ.get("SECRET_KEY")
 if not app.secret_key:
     raise RuntimeError("Configure APP_SESSION_SECRET nas variáveis da Vercel.")
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=True)
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=bool(os.environ.get("VERCEL")) or os.environ.get("FORCE_HTTPS") == "1")
 DB = os.environ.get("DB_PATH", "cripto_pix_v2.db")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 LIVE = False
