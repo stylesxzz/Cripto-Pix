@@ -1,3 +1,47 @@
-{% extends "base.html" %}{% block b %}<div class="box"><span class="logo">Cripto<b>Pix</b></span><h2>Entrar no painel</h2>
-{% if err %}<p style="color:var(--red2)">{{err}}</p>{% endif %}
-<form method="post"><label>Usuário</label><input name="user" autocomplete="username" required><label>Senha</label><input name="password" type="password" autocomplete="current-password" required><button class="btn" style="width:100%">Entrar</button></form></div>{% endblock %}
+{% extends "base.html" %}{% block t %}{% if setup %}Configuração inicial · {% endif %}Cripto Pix{% endblock %}{% block b %}
+<div class="box auth-box">
+  <span class="logo">Cripto<b>Pix</b></span>
+  {% if setup %}
+    <h2>Configuração inicial</h2>
+    <p class="muted">Crie seu acesso exclusivo e conecte sua carteira e os serviços. Isso aparece apenas uma vez.</p>
+    {% if err %}<p class="error">{{err}}</p>{% endif %}
+    <form method="post" autocomplete="off">
+      <input type="hidden" name="_csrf" value="{{csrf()}}">
+      <h3>Seu acesso</h3>
+      <label>Usuário administrador</label><input name="user" autocomplete="username" required maxlength="80" placeholder="Seu usuário">
+      <div class="grid2">
+        <div><label>Senha (mínimo 10 caracteres)</label><input name="password" type="password" autocomplete="new-password" required minlength="10"></div>
+        <div><label>Confirmar senha</label><input name="password_confirm" type="password" autocomplete="new-password" required minlength="10"></div>
+      </div>
+      <h3>Carteira de recebimento</h3>
+      <div class="grid2">
+        <div><label>Moeda</label><select name="wallet_asset"><option value="USDC">USDC</option><option value="USDT">USDT</option></select></div>
+        <div><label>Rede</label><select name="wallet_network"><option>Base</option><option>Ethereum</option><option>Solana</option><option>Tron</option></select></div>
+      </div>
+      <label>Endereço público da carteira</label><input name="wallet_address" required spellcheck="false" placeholder="Endereço público da carteira">
+      <h3>Hodle</h3>
+      <label>Chave API da Hodle</label><input name="hodle_api_key" type="password" required autocomplete="new-password" placeholder="Sua chave API">
+      <label>ID do Workspace da Hodle</label><input name="hodle_workspace_id" required spellcheck="false" placeholder="Workspace ID">
+      <h3>WhatsApp <span class="optional">opcional</span></h3>
+      <label>Token da API WhatsApp Cloud</label><input name="wa_token" type="password" autocomplete="new-password" placeholder="Deixe vazio para configurar depois">
+      <label>ID do número de telefone (Phone Number ID)</label><input name="wa_phone_id" placeholder="Deixe vazio para configurar depois">
+      <div class="grid2">
+        <div><label>Modelo de mensagem</label><input name="wa_template" value="cobranca_mensal"></div>
+        <div><label>Idioma</label><input name="wa_lang" value="pt_BR"></div>
+      </div>
+      <button class="btn" style="width:100%;margin-top:8px">Salvar configuração e entrar</button>
+    </form>
+    <p class="security-note">As credenciais são criptografadas antes de serem gravadas no banco privado. Nenhuma chave será publicada no GitHub.</p>
+  {% else %}
+    <h2>Entrar no painel</h2>
+    <p class="muted">Acesso exclusivo do administrador.</p>
+    {% if err %}<p class="error">{{err}}</p>{% endif %}
+    <form method="post" autocomplete="on">
+      <input type="hidden" name="_csrf" value="{{csrf()}}">
+      <label>Usuário</label><input name="user" autocomplete="username" required>
+      <label>Senha</label><input name="password" type="password" autocomplete="current-password" required>
+      <button class="btn" style="width:100%;margin-top:8px">Entrar</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}
