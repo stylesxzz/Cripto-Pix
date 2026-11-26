@@ -124,7 +124,7 @@ Sem `WA_TOKEN` e `WA_PHONE_ID`, o sistema continua funcionando e você envia a c
 
 | Variável | Função |
 |---|---|
-| `SECRET_KEY` | texto longo e aleatório que protege a sessão |
+| `APP_SESSION_SECRET` | chave persistente que protege a sessão |\n| `APP_ENCRYPTION_KEY` | chave usada para criptografar as credenciais salvas |\n| `DATABASE_URL` | conexão PostgreSQL persistente (Neon) |
 | `ADMIN_USER` | usuário do login do painel |
 | `ADMIN_PASS_HASH` | hash da senha (gerado por `gerar_hash.py`, entre aspas simples) |
 | `MIN_SUB_BRL` | valor mínimo de assinatura (padrão 100) |
@@ -154,7 +154,7 @@ static/           estilo
 ## Solução de problemas
 
 - **O login não sai da tela:** use `BASE_URL=http://localhost:5000` e `FORCE_HTTPS=0` fora de HTTPS, gere o hash com `python gerar_hash.py` e confira `ADMIN_USER`.
-- **Cobrança mensal não saiu:** o app precisa ficar ligado 24h. Se ficar fora do ar por mais de 10 dias, cobranças antigas são puladas.
+- **Cobrança mensal não saiu:** a execução automática recorrente ainda precisa ser ligada a um Vercel Cron/Workflow; uma thread em segundo plano não é executada de forma confiável em funções serverless.
 - **WhatsApp não chegou:** confira se o modelo foi aprovado pela Meta e se o token está válido. O erro aparece na linha da cobrança.
 
 ## Aviso
