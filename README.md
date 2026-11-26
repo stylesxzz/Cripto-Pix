@@ -33,13 +33,17 @@ Rodar:
 python app.py
 ```
 
-Abra `http://localhost:5000`. Em produção use `gunicorn --workers 1 --threads 4 app:app` (apenas **1 worker**, por causa do agendador das assinaturas).
+Abra `http://localhost:5000` e conclua o assistente de configuração na tela. Em produção, use PostgreSQL persistente; o SQLite local é apenas para desenvolvimento.
 
-## Configuração do `.env`
+## Primeiro acesso e configuração
 
-Todas as chaves ficam **só** no arquivo `.env`. Esse arquivo nunca deve ir para o GitHub (veja a seção de segurança).
+Ao abrir o painel pela primeira vez, a própria tela apresenta o assistente de configuração. Cadastre um único usuário administrador, senha, carteira, chave API e Workspace ID da Hodle. Os dados do WhatsApp são opcionais. Nos próximos acessos, será exibido somente o formulário de login.
 
-### 1. Trocar a carteira cripto
+As credenciais sensíveis são criptografadas antes de serem salvas no PostgreSQL. Em produção, configure `DATABASE_URL`, `APP_SESSION_SECRET` e `APP_ENCRYPTION_KEY` nas variáveis privadas da hospedagem. O projeto Vercel usa PostgreSQL gerenciado pelo Neon; não coloque essas chaves no GitHub.
+
+O formulário guarda a chave e o Workspace da Hodle, mas **não ativa a automação financeira**: os métodos de criar Pix, converter e enviar cripto em `hodle.py` continuam aguardando a documentação oficial da API. O modo automático permanece desligado até essa integração ser implementada e testada.
+
+### 1. Carteira cripto
 
 ```env
 WALLET_ASSET=USDC
